@@ -75,13 +75,30 @@ fallbacks.
   extra-usage cap, not a prepaid wallet. The OAuth endpoint may instead report
   `spend.used.amount_minor`/`exponent` (quota-exporter), which is used as a
   fallback.
-- **Not yet verified against a logged-in response.** I had no session key while
-  building, so the browser network-tab check the spec asks for still needs
-  doing. `claude-usage poll --print-raw` prints the live response for that
-  comparison. If it differs, fix `cusage/parse.py`, then run `backfill-parse`.
+- **Verified against a live logged-in response on 2026-10-20**, saved as
+  `tests/fixtures/usage_2026-10-20.json`. Session and weekly utilization parse
+  correctly. Findings:
+  - **Per-model weekly limits now appear only in `limits`**
+    (`kind: "weekly_scoped"`, `scope.model.display_name: "Fable"`). All the
+    top-level `seven_day_<model>` keys were `null`. Those entries are mapped
+    to `seven_day_<slug>` buckets, matching the old naming, so history stays
+    continuous whichever form the API uses. A top-level key wins if both exist.
+  - The response also carries many codename keys (`tangelo`,
+    `iguana_necktie`, …), all `null`. If any of them gains a utilization
+    field, it becomes a bucket automatically.
+  - `extra_usage` can be `is_enabled: false` with
+    `disabled_reason: "out_of_credits"`. `spend.balance` is now preferred for
+    `credits_balance` when non-null. Otherwise headroom under the cap is used,
+    and `status` flags the disabled state, so "$5.00 remaining" isn't
+    mistaken for spendable credit.
+  - `seven_day_breakdown` gives each surface's share of weekly usage, for
+    example Claude Code 80 %. It's outside the spec and not parsed into columns,
+    but it's kept in `raw_json`, so it can be added later with `backfill-parse`.
 
 **Plan detection** (jimdawdy: `monthly_limit` 2000/10000/20000 → Pro/Max5/Max20)
-is shown in `status` as "Plan (heuristic)" but never stored. `monthly_limit` looks
+is shown in `status` as "Plan (heuristic)" but never stored. The live response
+had `monthly_limit: 500` ($5), confirming it is the user-set extra-usage cap,
+not a plan marker, so the heuristic will usually show nothing. `monthly_limit` looks
 like the user-adjustable extra-usage spending cap, so treating it as a plan
 signal is fragile.
 

@@ -72,13 +72,17 @@ def cmd_status(cfg: Config, conn, args) -> int:
         print(f"Weekly (7d)          : {_pct(last_ok['weekly_pct'])}  resets {_local(cfg, last_ok['weekly_resets_at'])} {_until(last_ok['weekly_resets_at'])}")
         for b in conn.execute("SELECT * FROM poll_buckets WHERE poll_id = ? ORDER BY bucket_name", (last_ok["id"],)):
             print(f"  {b['bucket_name']:<19}: {_pct(b['pct'])}")
+        try:
+            raw = json.loads(last_ok["raw_json"] or "{}")
+        except ValueError:
+            raw = {}
+        plan = detect_plan(raw)
+        extra = raw.get("extra_usage") if isinstance(raw, dict) and isinstance(raw.get("extra_usage"), dict) else {}
         if last_ok["credits_spent_month"] is not None:
             bal = f", ${last_ok['credits_balance']:.2f} remaining" if last_ok["credits_balance"] is not None else ""
-            print(f"Usage credits        : ${last_ok['credits_spent_month']:.2f} spent this month{bal}")
-        try:
-            plan = detect_plan(json.loads(last_ok["raw_json"] or "{}"))
-        except ValueError:
-            plan = None
+            off = (f"  (extra usage disabled: {extra.get('disabled_reason') or 'off'})"
+                   if extra.get("is_enabled") is False else "")
+            print(f"Usage credits        : ${last_ok['credits_spent_month']:.2f} spent this month{bal}{off}")
         if plan:
             print(f"Plan (heuristic)     : {plan}")
     if st.get("interval_s") is not None:

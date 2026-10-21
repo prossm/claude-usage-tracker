@@ -10,8 +10,14 @@ api.anthropic.com/api/oauth/usage share it):
       "seven_day_sonnet": ..., "seven_day_oauth_apps": ...,
       "extra_usage": {"is_enabled": true, "monthly_limit": 10000,
                       "used_credits": 250, "utilization": 2.5}
-      "spend": {"used": {"amount_minor": 250, "exponent": 2}}   # OAuth variant
+      "spend": {"used": {"amount_minor": 250, "exponent": 2}, "balance": ...},
+      "limits": [{"kind": "weekly_scoped", "percent": 0, "resets_at": "...",
+                  "scope": {"model": {"display_name": "Fable"}, "surface": null}}, ...]
     }
+
+Seen live on 2026-10-20 (tests/fixtures/usage_2026-10-20.json): per-model
+weekly limits now appear only in `limits` (kind weekly_scoped), while the
+seven_day_<model> keys are null. Both are mapped to seven_day_<slug> buckets.
 
 Unknown keys are ignored here (they stay in raw_json). A missing expected key
 yields NULL plus a warning; it never raises.
@@ -19,6 +25,7 @@ yields NULL plus a warning; it never raises.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from .util import parse_iso, to_iso
@@ -74,6 +81,40 @@ def _num(value) -> float | None:
     return None
 
 
+def _slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
+def _money(obj) -> float | None:
+    """{"amount_minor": 250, "exponent": 2} -> 2.5"""
+    if not isinstance(obj, dict) or _num(obj.get("amount_minor")) is None:
+        return None
+    exp = obj.get("exponent")
+    return round(obj["amount_minor"] / (10 ** exp if isinstance(exp, int) else 100), 2)
+
+
+def _scoped_limit_buckets(limits, existing: set[str]) -> list[Bucket]:
+    out = []
+    for entry in limits if isinstance(limits, list) else []:
+        if not isinstance(entry, dict) or entry.get("kind") != "weekly_scoped":
+            continue
+        scope = entry.get("scope") if isinstance(entry.get("scope"), dict) else {}
+        model = scope.get("model") if isinstance(scope.get("model"), dict) else {}
+        surface = scope.get("surface")
+        surface_name = (surface.get("display_name") or surface.get("id")) if isinstance(surface, dict) else surface
+        if model.get("display_name") or model.get("id"):
+            name = f"seven_day_{_slug(str(model.get('display_name') or model.get('id')))}"
+        elif surface_name:
+            name = f"seven_day_surface_{_slug(str(surface_name))}"
+        else:
+            continue
+        if name in existing:
+            continue  # already reported as a top-level seven_day_<model> object
+        existing.add(name)
+        out.append(Bucket(name, _num(entry.get("percent")), to_iso(parse_iso(entry.get("resets_at")))))
+    return out
+
+
 def _window(obj) -> tuple[float | None, str | None, bool]:
     """(pct, resets_at, pct_field_found)."""
     if not isinstance(obj, dict):
@@ -120,6 +161,7 @@ def parse_usage(data) -> Usage:
         pct, reset, found = _window(value)
         if found:
             u.buckets.append(Bucket(key, pct, reset))
+    u.buckets += _scoped_limit_buckets(data.get("limits"), {b.name for b in u.buckets})
     u.buckets.sort(key=lambda b: b.name)
 
     extra = data.get("extra_usage")
@@ -133,12 +175,15 @@ def parse_usage(data) -> Usage:
             u.credits_monthly_limit = round(limit / 100, 2)
             if used is not None:
                 u.credits_balance = round((limit - used) / 100, 2)
+    spend = data.get("spend") if isinstance(data.get("spend"), dict) else {}
     if u.credits_spent_month is None:
-        spend_used = (data.get("spend") or {}).get("used") if isinstance(data.get("spend"), dict) else None
-        if isinstance(spend_used, dict) and _num(spend_used.get("amount_minor")) is not None:
-            exp = spend_used.get("exponent")
-            div = 10 ** exp if isinstance(exp, int) else 100
-            u.credits_spent_month = round(spend_used["amount_minor"] / div, 2)
+        u.credits_spent_month = _money(spend.get("used"))
+    # Prefer an explicit balance. Without one, fall back to headroom under the
+    # monthly cap, which overstates what's spendable when extra usage is
+    # disabled (e.g. disabled_reason "out_of_credits"); `status` shows that.
+    balance = _money(spend.get("balance"))
+    if balance is not None:
+        u.credits_balance = balance
     return u
 
 

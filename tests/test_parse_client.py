@@ -1,5 +1,6 @@
 import json
 import unittest
+from pathlib import Path
 
 from cusage.client import AUTH, NETWORK, OK, OTHER, SERVER, CookieAuth, HttpResponse, classify, get_json
 from cusage.parse import detect_plan, parse_usage
@@ -59,6 +60,32 @@ class ParseTests(unittest.TestCase):
         a = parse_usage(usage_json(session_reset="2026-10-20T20:00:00.1+00:00")).change_key()
         b = parse_usage(usage_json(session_reset="2026-10-20T20:00:00.9+00:00")).change_key()
         self.assertEqual(a, b)
+
+
+class LiveFixtureTests(unittest.TestCase):
+    """The real claude.ai response captured on the Pi on 2026-10-20."""
+
+    def setUp(self):
+        self.data = json.loads((Path(__file__).parent / "fixtures" / "usage_2026-10-20.json").read_text())
+
+    def test_live_response(self):
+        u = parse_usage(self.data)
+        self.assertEqual((u.session_pct, u.weekly_pct), (6.0, 33.0))
+        self.assertEqual((u.session_resets_at, u.weekly_resets_at), ("2026-10-21T06:00:00Z", "2026-10-22T18:00:00Z"))
+        self.assertEqual([(b.name, b.pct, b.resets_at) for b in u.buckets],
+                         [("seven_day_fable", 0.0, "2026-10-22T18:00:00Z")])
+        self.assertEqual(u.credits_spent_month, 0.0)
+        self.assertEqual(u.warnings, [])
+        self.assertIsNone(detect_plan(self.data))  # monthly_limit is a user cap, not a plan
+
+    def test_top_level_model_key_wins_over_limits_entry(self):
+        self.data["seven_day_fable"] = {"utilization": 12.0, "resets_at": "2026-10-22T18:00:00+00:00"}
+        buckets = parse_usage(self.data).buckets
+        self.assertEqual([(b.name, b.pct) for b in buckets], [("seven_day_fable", 12.0)])
+
+    def test_explicit_balance_preferred(self):
+        self.data["spend"]["balance"] = {"amount_minor": 125, "exponent": 2}
+        self.assertEqual(parse_usage(self.data).credits_balance, 1.25)
 
 
 class ClassifyTests(unittest.TestCase):
