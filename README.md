@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/quota-mark-dark.svg">
+    <img src="assets/quota-mark.svg" width="96" height="96" alt="Claude Usage Tracker">
+  </picture>
+</p>
+
 # Claude Usage Tracker
 
 A small service for a Raspberry Pi that:
@@ -131,10 +138,11 @@ Useful Notion views include a weekly-grouped table, a chart of *Max weekly %* by
 
 ### Slack webhook
 
-1. Go to <https://api.slack.com/apps>, choose **Create New App**, then **From scratch**, and pick your workspace.
+1. Go to <https://api.slack.com/apps>, choose **Create New App**, then **From scratch**, and pick your workspace. If Slack warns *"Your app can't do anything yet"*, choose **Create Anyway**; the next step adds the scope the app needs.
 2. Open **Incoming Webhooks**, switch it on, then choose **Add New Webhook to Workspace** and pick the channel.
 3. Copy the `https://hooks.slack.com/services/…` URL into `SLACK_WEBHOOK_URL`.
-4. Run `claude-usage test-alert` to check it.
+4. Optional: give alerts the tracker's icon. Under **Basic Information**, go to **Display Information**, upload [`assets/slack-app-icon.png`](assets/slack-app-icon.png) as the **App icon**, and set the background color to `#F5F4F1`. Webhook messages use the app's icon; they can't set their own.
+5. Run `claude-usage test-alert` to check it.
 
 ## Commands
 
@@ -246,4 +254,5 @@ Layout:
   - `alerts.py`: Slack alerts.
   - `cctokens.py`: Claude Code token counts.
 - `systemd/`: the unit files.
+- `assets/`: the quota mark (light and dark SVG, favicon), and `slack-app-icon.png`, a 1024 px render for the Slack app.
 - `install.sh`: the installer.
