@@ -98,7 +98,11 @@ The poller notices that `.env` changed and reloads it, so no restart is needed. 
 
 ### Notion setup
 
-1. **Create an integration.** Go to <https://www.notion.so/profile/integrations>, choose **New integration**, and set the type to **Internal**. Give it the workspace. Under capabilities it needs Read, Update and Insert content. Copy the **Internal Integration Secret** into `NOTION_TOKEN`.
+1. **Create an internal connection.** You must be the workspace owner.
+   - In Notion's developer portal (<https://app.notion.com/developers/connections>), go to **Internal connections** and choose **Create a new connection**. If Notion asks for the connection type, choose **API token**.
+   - Name it and pick your workspace.
+   - On the **Configuration** tab, turn on the Read, Update and Insert content capabilities, then copy the API token (`ntn_…`) into `NOTION_TOKEN`.
+   - Use this rather than a *personal access token*. A personal access token can reach everything you can reach in Notion; a connection can reach only what you share with it.
 2. **Create a database** as a full-page table, with exactly these properties:
 
    | Property | Type |
@@ -115,7 +119,9 @@ The poller notices that `.env` changed and reloads it, so no restart is needed. 
    | CC input tokens | Number |
    | CC output tokens | Number |
 
-3. **Share the database with the integration.** On the database page, open the **⋯** menu, choose **Connections**, then **Connect to**, and pick your integration.
+3. **Share the database with the connection.** Do one of the following:
+   - On the connection's **Content access** tab, choose **Edit access** and select the database.
+   - On the database page, open the **•••** menu, choose **Connections**, then **+ Add connection**, and pick it.
 4. **Copy the database URL** into `NOTION_DATABASE_ID`. The ID is the 32 hex characters before `?v=`; pasting the whole URL also works.
 5. Run `claude-usage sync --check`. It lists any missing or mistyped property.
 

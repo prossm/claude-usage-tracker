@@ -123,7 +123,7 @@ class Notion:
                 self.data_source_id = self.database_id
                 return self.data_source_id
             raise NotionError(f"database {self.database_id} not found, or not shared with the integration "
-                              "(open the database, ... menu > Connections > add your integration)")
+                              "(open the database, ••• menu > Connections > + Add connection)")
         sources = db.get("data_sources") or []
         if len(sources) != 1:
             listing = ", ".join(f"{d.get('name') or 'unnamed'} = {d.get('id')}" for d in sources) or "none"
