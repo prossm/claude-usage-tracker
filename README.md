@@ -18,6 +18,12 @@ Polling is adaptive: every 30 s while usage is moving, backing off to every 5 mi
 
 See [DECISIONS.md](DECISIONS.md) for what was borrowed from prior art and why.
 
+> **Unofficial, and it can break without notice.** This tool reads the same internal claude.ai endpoint the Settings > Usage page uses. Anthropic doesn't document or support it, and can change or remove it at any time. Changes so far have been additive: new keys and per-model limits moving into a `limits` list. If it breaks:
+> - The tracker never mistakes a changed response for data. A missing field triggers a Slack alert and is stored as empty, and an HTML or Cloudflare page counts as a failed poll.
+> - Every raw response is kept, so once the parser is fixed, `backfill-parse` recovers the history.
+>
+> This project isn't affiliated with or endorsed by Anthropic. Use it with your own account, and keep the polling rate modest.
+
 ```
 claude.ai usage API ──► poller (systemd service) ──► usage.db (SQLite, WAL)
                                                          │
@@ -256,3 +262,7 @@ Layout:
 - `systemd/`: the unit files.
 - `assets/`: the quota mark (light and dark SVG, favicon), and `slack-app-icon.png`, a 1024 px render for the Slack app.
 - `install.sh`: the installer.
+
+## License
+
+MIT; see [LICENSE](LICENSE). Third-party attributions are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
