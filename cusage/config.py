@@ -61,6 +61,7 @@ class Config:
     impersonate: str = "firefox133"
     notion_token: str = ""
     notion_database_id: str = ""
+    notion_data_source_id: str = ""
     slack_webhook_url: str = ""
     tz_name: str = "America/New_York"
     cc_log_dir: Path | None = None
@@ -93,6 +94,7 @@ def load(env_file: str | None = None) -> Config:
     cfg.impersonate = env.get("CLAUDE_IMPERSONATE", cfg.impersonate).strip() or cfg.impersonate
     cfg.notion_token = env.get("NOTION_TOKEN", "").strip()
     cfg.notion_database_id = env.get("NOTION_DATABASE_ID", "").strip()
+    cfg.notion_data_source_id = env.get("NOTION_DATA_SOURCE_ID", "").strip()
     cfg.slack_webhook_url = env.get("SLACK_WEBHOOK_URL", "").strip()
     cfg.tz_name = env.get("TZ_NAME", cfg.tz_name).strip() or cfg.tz_name
     try:

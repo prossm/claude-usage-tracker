@@ -132,7 +132,7 @@ def _local_days_with_polls(cfg: Config, conn) -> list[str]:
 
 
 def cmd_sync(cfg: Config, conn, args) -> int:
-    notion = Notion(cfg.notion_token, cfg.notion_database_id)
+    notion = Notion(cfg.notion_token, cfg.notion_database_id, data_source_id=cfg.notion_data_source_id)
     if args.check:
         problems = notion.verify_schema()
         if problems:

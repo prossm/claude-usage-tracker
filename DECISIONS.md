@@ -157,9 +157,20 @@ As specified, a `polls` row is written when a value changes, at least every
 
 **Written fresh, stdlib `urllib`.**
 
-- API version `2022-06-28`, which uses the `databases/{id}/query` endpoints.
-  A database with multiple data sources (a 2025 Notion feature) would need
-  the newer API. A plain single-table database is fine.
+- **API version `2026-03-11`**, the latest at the time of writing. The first
+  draft used `2022-06-28`, which Notion still accepts, but the official SDK
+  dropped it in v5, so I upgraded rather than build on a version that's on its
+  way out. What changed as a result:
+  - Since `2025-09-03`, a database is a container of *data sources*. The data
+    source ID is resolved once per run from `GET /databases/{id}` →
+    `data_sources`. It is then used for the schema (`GET /data_sources/{id}`),
+    the lookup (`POST /data_sources/{id}/query`), and the page parent
+    (`{"type": "data_source_id", ...}`).
+  - A database with more than one data source is refused, with the list of
+    IDs, until `NOTION_DATA_SOURCE_ID` is set.
+  - If the configured ID is itself a data source ID, that is accepted too.
+  - `2026-03-11` replaced `archived` with `in_trash`. Trashed pages are skipped
+    in the lookup, and a trashed stored page ID falls through to find/create.
 - `sync` verifies the 11 properties and their types first, and exits with the
   list of missing or mistyped ones.
 - Upsert order: PATCH the stored page ID. If it is gone or archived, query the

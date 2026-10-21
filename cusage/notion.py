@@ -1,4 +1,10 @@
-"""Upsert `daily` rows into a Notion database (stdlib HTTP, ~3 req/s, 429 backoff)."""
+"""Upsert `daily` rows into a Notion database (stdlib HTTP, ~3 req/s, 429 backoff).
+
+Targets Notion API 2026-03-11. Since 2025-09-03 a database is a container of
+one or more data sources; schema reads, queries and page parents all use the
+data source ID, which is resolved from NOTION_DATABASE_ID at startup. Trash
+state is `in_trash` (the old `archived` field is gone as of 2026-03-11).
+"""
 
 from __future__ import annotations
 
@@ -16,7 +22,7 @@ from .util import scrub, to_iso, utcnow
 log = logging.getLogger(__name__)
 
 API = "https://api.notion.com/v1"
-NOTION_VERSION = "2022-06-28"
+NOTION_VERSION = "2026-03-11"
 MIN_GAP_S = 0.35
 MAX_ATTEMPTS = 6
 
@@ -64,11 +70,13 @@ def _urllib_request(method: str, url: str, body: dict | None, headers: dict) -> 
 
 class Notion:
     def __init__(self, token: str, database_id: str, request: Request | None = None,
-                 sleep: Callable[[float], None] = time.sleep, min_gap: float = MIN_GAP_S):
-        if not token or not database_id:
+                 sleep: Callable[[float], None] = time.sleep, min_gap: float = MIN_GAP_S,
+                 data_source_id: str = ""):
+        if not token or not (database_id or data_source_id):
             raise NotionError("NOTION_TOKEN and NOTION_DATABASE_ID must be set")
         self._token = token
-        self.database_id = normalize_id(database_id)
+        self.database_id = normalize_id(database_id) if database_id else ""
+        self.data_source_id = normalize_id(data_source_id) if data_source_id else ""
         self._request = request or _urllib_request
         self._sleep = sleep
         self._min_gap = min_gap
@@ -103,12 +111,34 @@ class Notion:
             raise NotionError(f"Notion {method} {path} failed: HTTP {status}: {payload.get('message', '')}")
         raise NotionError(f"Notion {method} {path} failed after {MAX_ATTEMPTS} attempts")
 
+    def resolve_data_source(self) -> str:
+        """Data source ID for the configured database (cached)."""
+        if self.data_source_id:
+            return self.data_source_id
+        status, db = self._call("GET", f"/databases/{self.database_id}", allow=(400, 404))
+        if status in (400, 404):
+            # Maybe the configured ID is already a data source ID.
+            status, _ = self._call("GET", f"/data_sources/{self.database_id}", allow=(400, 404))
+            if status == 200:
+                self.data_source_id = self.database_id
+                return self.data_source_id
+            raise NotionError(f"database {self.database_id} not found, or not shared with the integration "
+                              "(open the database, ... menu > Connections > add your integration)")
+        sources = db.get("data_sources") or []
+        if len(sources) != 1:
+            listing = ", ".join(f"{d.get('name') or 'unnamed'} = {d.get('id')}" for d in sources) or "none"
+            raise NotionError(f"database {self.database_id} has {len(sources)} data sources ({listing}); "
+                              "set NOTION_DATA_SOURCE_ID to the one to sync into")
+        self.data_source_id = sources[0]["id"]
+        return self.data_source_id
+
     def verify_schema(self) -> list[str]:
-        status, db = self._call("GET", f"/databases/{self.database_id}", allow=(404,))
-        if status == 404:
-            return [f"database {self.database_id} not found, or not shared with the integration "
-                    "(open the database, ... menu > Connections > add your integration)"]
-        props = db.get("properties", {})
+        try:
+            ds = self.resolve_data_source()
+        except NotionError as exc:
+            return [str(exc)]
+        _, source = self._call("GET", f"/data_sources/{ds}")
+        props = source.get("properties", {})
         problems = []
         for name, kind in REQUIRED_PROPERTIES.items():
             if name not in props:
@@ -118,24 +148,27 @@ class Notion:
         return problems
 
     def find_page(self, day: str) -> str | None:
-        _, res = self._call("POST", f"/databases/{self.database_id}/query", {
-            "filter": {"property": "Day", "title": {"equals": day}}, "page_size": 5})
-        pages = [p for p in res.get("results", []) if not p.get("archived") and not p.get("in_trash")]
+        _, res = self._call("POST", f"/data_sources/{self.resolve_data_source()}/query", {
+            "filter": {"property": "Day", "title": {"equals": day}}, "page_size": 5, "result_type": "page"})
+        pages = [p for p in res.get("results", []) if not p.get("in_trash") and not p.get("is_archived")]
         if len(pages) > 1:
             log.warning("Notion has %d pages for %s; updating the first", len(pages), day)
         return pages[0]["id"] if pages else None
 
     def update_page(self, page_id: str, props: dict) -> bool:
-        """False if the page is gone or archived (caller falls back to find/create)."""
+        """False if the page is gone or in the trash (caller falls back to find/create)."""
         status, payload = self._call("PATCH", f"/pages/{page_id}", {"properties": props}, allow=(400, 404))
-        if status == 404 or (status == 400 and "archived" in payload.get("message", "").lower()):
+        message = payload.get("message", "").lower()
+        if status == 404 or (status == 400 and ("archived" in message or "trash" in message)):
             return False
         if status == 400:
             raise NotionError(f"Notion PATCH /pages failed: HTTP 400: {payload.get('message', '')}")
-        return True
+        return not payload.get("in_trash", False)
 
     def create_page(self, props: dict) -> str:
-        _, page = self._call("POST", "/pages", {"parent": {"database_id": self.database_id}, "properties": props})
+        _, page = self._call("POST", "/pages", {
+            "parent": {"type": "data_source_id", "data_source_id": self.resolve_data_source()},
+            "properties": props})
         return page["id"]
 
 

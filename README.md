@@ -61,6 +61,7 @@ All settings live in `/opt/claude-usage/.env` (owner `claudeusage`, mode `600`).
 | `CLAUDE_ORG_ID` | Optional org UUID; otherwise discovered (the org with `chat` capability) |
 | `NOTION_TOKEN` | Notion internal integration token |
 | `NOTION_DATABASE_ID` | Database ID, or just paste the database URL |
+| `NOTION_DATA_SOURCE_ID` | Optional; only for a database with several data sources |
 | `SLACK_WEBHOOK_URL` | Slack incoming webhook |
 | `TZ_NAME` | e.g. `America/New_York`; defines a "day" |
 | `CLAUDE_CODE_LOG_DIR` | Optional, e.g. `/home/pi/.claude/projects`; unset = token job skipped |
@@ -112,6 +113,8 @@ The poller notices that `.env` changed and reloads it, so no restart is needed. 
 3. **Share the database with the integration.** On the database page, open the **⋯** menu, choose **Connections**, then **Connect to**, and pick your integration.
 4. **Copy the database URL** into `NOTION_DATABASE_ID`. The ID is the 32 hex characters before `?v=`; pasting the whole URL also works.
 5. Run `claude-usage sync --check`. It lists any missing or mistyped property.
+
+The tracker uses Notion API version `2026-03-11`, where a database contains one or more *data sources*. It finds the data source from the database ID by itself. If you've added a second data source to the database, `sync` stops and lists the data source IDs; put the right one in `NOTION_DATA_SOURCE_ID`.
 
 Useful Notion views include a weekly-grouped table, a chart of *Max weekly %* by *Date*, and a filter on *Overage* is checked.
 

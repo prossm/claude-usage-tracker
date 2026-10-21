@@ -66,27 +66,38 @@ class RollupTests(unittest.TestCase):
 
 
 class FakeNotion:
-    """In-memory Notion API."""
+    """In-memory Notion API, version 2026-03-11 (databases contain data sources)."""
 
-    def __init__(self, props=None, throttle_first=0):
+    def __init__(self, props=None, throttle_first=0, sources=None):
         self.pages = {}
+        self.trashed = set()
         self.props = props or {k: {"type": v} for k, v in REQUIRED_PROPERTIES.items()}
+        self.sources = sources if sources is not None else [{"id": "ds-1", "name": "Daily"}]
         self.calls = []
         self.throttle = throttle_first
 
     def __call__(self, method, url, body, headers):
+        assert headers["Notion-Version"] == "2026-03-11"
         path = url.split("/v1", 1)[1]
         self.calls.append((method, path))
         if self.throttle:
             self.throttle -= 1
             return 429, {"Retry-After": "1"}, {}
+        ds_ids = {d["id"] for d in self.sources}
         if method == "GET" and path.startswith("/databases/"):
-            return 200, {}, {"properties": self.props}
-        if method == "POST" and path.endswith("/query"):
+            return 200, {}, {"object": "database", "data_sources": self.sources}
+        if method == "GET" and path.startswith("/data_sources/"):
+            if path.split("/")[-1] not in ds_ids:
+                return 404, {}, {"message": "not found"}
+            return 200, {}, {"object": "data_source", "properties": self.props}
+        if method == "POST" and path.startswith("/data_sources/") and path.endswith("/query"):
+            assert path.split("/")[2] in ds_ids
             day = body["filter"]["title"]["equals"]
-            hits = [{"id": pid} for pid, p in self.pages.items() if p["Day"]["title"][0]["text"]["content"] == day]
+            hits = [{"id": pid, "in_trash": pid in self.trashed} for pid, p in self.pages.items()
+                    if p["Day"]["title"][0]["text"]["content"] == day]
             return 200, {}, {"results": hits}
         if method == "POST" and path == "/pages":
+            assert body["parent"]["type"] == "data_source_id" and body["parent"]["data_source_id"] in ds_ids
             pid = f"page-{len(self.pages) + 1}"
             self.pages[pid] = body["properties"]
             return 200, {}, {"id": pid}
@@ -94,8 +105,10 @@ class FakeNotion:
             pid = path.split("/")[-1]
             if pid not in self.pages:
                 return 404, {}, {"message": "not found"}
+            if pid in self.trashed:
+                return 400, {}, {"message": "Can't edit block that is in trash."}
             self.pages[pid] = body["properties"]
-            return 200, {}, {"id": pid}
+            return 200, {}, {"id": pid, "in_trash": False}
         return 400, {}, {"message": "unexpected"}
 
 
@@ -131,6 +144,24 @@ class NotionTests(unittest.TestCase):
         sync(self.conn, self.notion(fake))
         fake.pages.clear()
         sync(self.conn, self.notion(fake), force=True)
+        self.assertEqual(len(fake.pages), 2)
+
+    def test_trashed_page_replaced(self):
+        fake = FakeNotion()
+        rollup(self.conn, self.cfg, today=TODAY)
+        sync(self.conn, self.notion(fake))
+        fake.trashed.update(fake.pages)
+        sync(self.conn, self.notion(fake), force=True)
+        self.assertEqual(len(fake.pages) - len(fake.trashed), 2)
+
+    def test_multiple_data_sources_need_explicit_id(self):
+        fake = FakeNotion(sources=[{"id": "ds-1", "name": "A"}, {"id": "ds-2", "name": "B"}])
+        rollup(self.conn, self.cfg, today=TODAY)
+        with self.assertRaises(NotionError) as cm:
+            sync(self.conn, self.notion(fake))
+        self.assertIn("set NOTION_DATA_SOURCE_ID", str(cm.exception))
+        n = Notion("secret_x", "a" * 32, request=fake, sleep=self.sleeps.append, min_gap=0, data_source_id="ds-2")
+        sync(self.conn, n)
         self.assertEqual(len(fake.pages), 2)
 
     def test_429_backoff(self):
