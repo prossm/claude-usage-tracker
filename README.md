@@ -24,9 +24,14 @@ claude.ai usage API ──► poller (systemd service) ──► usage.db (SQLit
 On the Pi (Raspberry Pi OS 64-bit, Python 3.11+):
 
 ```sh
-git clone <this repo> claude-usage && cd claude-usage
+sudo apt install -y git gh                # if not already installed
+gh auth login                             # the repo is private; choose GitHub.com, HTTPS, log in with a browser/code
+gh repo clone prossm/claude-usage-tracker ~/claude-usage-tracker
+cd ~/claude-usage-tracker
 sudo ./install.sh
 ```
+
+The clone is only the source for installing. The service runs from the copy `install.sh` puts in `/opt/claude-usage`. To upgrade later, run `git pull && sudo ./install.sh`.
 
 `install.sh` is idempotent, so you can re-run it to upgrade. It does the following:
 
