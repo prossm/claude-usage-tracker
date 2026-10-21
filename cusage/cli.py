@@ -8,7 +8,7 @@ import logging
 import sys
 from datetime import date, timedelta
 
-from . import cctokens, config as config_mod, db
+from . import cctokens, config as config_mod, db, events
 from .alerts import Alerter
 from .config import Config, ConfigError
 from .notion import Notion, NotionError, sync as notion_sync
@@ -158,6 +158,34 @@ def cmd_cc_tokens(cfg: Config, conn, args) -> int:
     return 0
 
 
+def cmd_cc_push(cfg: Config, conn, args) -> int:
+    if cfg.cc_log_dir is None:
+        log.error("CLAUDE_CODE_LOG_DIR must be set for cc-push")
+        return 2
+    n = cctokens.push(conn, cfg, everything=args.all)
+    print(f"cc-push: sent {n} hourly row(s)")
+    return 0
+
+
+def cmd_serve(cfg: Config, conn, args) -> int:
+    from .dashboard import serve
+
+    conn.close()
+    serve(cfg)
+    return 0
+
+
+def cmd_events(cfg: Config, conn, args) -> int:
+    if args.rebuild:
+        print(f"events: rebuilt, {events.rebuild(conn, cfg)} event(s)")
+    else:
+        events.update(conn, cfg)
+        conn.commit()
+    for e in conn.execute("SELECT at, severity, message FROM limit_events ORDER BY at DESC, id DESC LIMIT ?", (args.limit,)):
+        print(f"{_local(cfg, e['at'], '%Y-%m-%d %H:%M')}  {e['severity']:<5}  {e['message']}")
+    return 0
+
+
 def cmd_backfill_parse(cfg: Config, conn, args) -> int:
     n = warned = 0
     for row in conn.execute("SELECT id, raw_json FROM polls WHERE ok = 1 AND raw_json IS NOT NULL ORDER BY id").fetchall():
@@ -171,7 +199,8 @@ def cmd_backfill_parse(cfg: Config, conn, args) -> int:
         n += 1
         warned += bool(usage.warnings)
     conn.commit()
-    print(f"backfill-parse: re-parsed {n} poll(s), {warned} with warnings. "
+    events.rebuild(conn, cfg)
+    print(f"backfill-parse: re-parsed {n} poll(s), {warned} with warnings; limit events rebuilt. "
           "Now run `rollup --all` then `sync` to refresh daily rows and Notion.")
     return 0
 
@@ -192,9 +221,10 @@ COMMANDS = {
     "poll": cmd_poll, "status": cmd_status, "rollup": cmd_rollup, "sync": cmd_sync,
     "cc-tokens": cmd_cc_tokens, "backfill-parse": cmd_backfill_parse,
     "test-alert": cmd_test_alert, "notify-unit-failure": cmd_notify_unit_failure,
+    "cc-push": cmd_cc_push, "serve": cmd_serve, "events": cmd_events,
 }
 # Nightly jobs alert on Slack when they raise, so a broken job is never silent.
-ALERT_ON_ERROR = {"rollup", "sync", "cc-tokens", "backfill-parse"}
+ALERT_ON_ERROR = {"rollup", "sync", "cc-tokens", "backfill-parse"}  # not cc-push: it runs on the Mac
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -220,6 +250,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("cc-tokens", help="sum Claude Code tokens per day (needs CLAUDE_CODE_LOG_DIR)")
     sub.add_parser("backfill-parse", help="re-parse raw_json of all polls after a parser fix")
+    sp = sub.add_parser("cc-push", help="Mac: send hourly Claude Code token totals to the Pi")
+    sp.add_argument("--all", action="store_true", help="send all history, not just the last 14 days")
+    sub.add_parser("serve", help="run the dashboard web server")
+    sp = sub.add_parser("events", help="list detected plan-limit changes")
+    sp.add_argument("--rebuild", action="store_true", help="recompute from all stored responses")
+    sp.add_argument("--limit", type=int, default=30)
     sub.add_parser("test-alert", help="send a test Slack message")
     sp = sub.add_parser("notify-unit-failure", help=argparse.SUPPRESS)
     sp.add_argument("unit")

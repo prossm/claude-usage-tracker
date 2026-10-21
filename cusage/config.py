@@ -71,6 +71,13 @@ class Config:
     poll_idle_threshold: int = 3
     poll_reset_burst_s: float = 120
     poll_heartbeat_s: float = 900
+    # Dashboard (Pi) and Claude Code token push (Mac -> Pi)
+    dashboard_bind: str = "127.0.0.1"
+    dashboard_port: int = 8787
+    cc_ingest_token: str = ""
+    cc_push_url: str = ""
+    cc_push_token: str = ""
+    cc_source_name: str = ""
 
     @property
     def tz(self) -> ZoneInfo:
@@ -83,7 +90,7 @@ def load(env_file: str | None = None) -> Config:
     env = read_env_file(path)
     env.update({k: v for k, v in os.environ.items() if v != ""})
 
-    cfg = Config(home=home, db_path=Path(env.get("CLAUDE_USAGE_DB", str(home / "usage.db"))))
+    cfg = Config(home=home, db_path=Path(env.get("CLAUDE_USAGE_DB", str(home / "usage.db"))).expanduser())
     cfg.auth_mode = env.get("CLAUDE_AUTH_MODE", "cookie").strip().lower() or "cookie"
     if cfg.auth_mode not in ("cookie", "oauth"):
         raise ConfigError("CLAUDE_AUTH_MODE must be 'cookie' or 'oauth'")
@@ -110,6 +117,13 @@ def load(env_file: str | None = None) -> Config:
     cfg.poll_reset_burst_s = _float(env, "POLL_RESET_BURST_SECONDS", cfg.poll_reset_burst_s)
     cfg.poll_heartbeat_s = _float(env, "POLL_HEARTBEAT_SECONDS", cfg.poll_heartbeat_s)
 
-    for secret in (cfg.session_key, cfg.notion_token, cfg.slack_webhook_url):
+    cfg.dashboard_bind = env.get("DASHBOARD_BIND", cfg.dashboard_bind).strip() or cfg.dashboard_bind
+    cfg.dashboard_port = int(_float(env, "DASHBOARD_PORT", cfg.dashboard_port))
+    cfg.cc_ingest_token = env.get("CC_INGEST_TOKEN", "").strip()
+    cfg.cc_push_url = env.get("CC_PUSH_URL", "").strip()
+    cfg.cc_push_token = env.get("CC_PUSH_TOKEN", "").strip()
+    cfg.cc_source_name = env.get("CC_SOURCE_NAME", "").strip()
+
+    for secret in (cfg.session_key, cfg.notion_token, cfg.slack_webhook_url, cfg.cc_ingest_token, cfg.cc_push_token):
         register_secret(secret)
     return cfg

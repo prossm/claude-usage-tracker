@@ -12,7 +12,8 @@ A small service for a Raspberry Pi that:
 - records how close a Claude account gets to its 5-hour session limit and 7-day weekly limit;
 - rolls that up per day, including limit hits, usage-credit (overage) spend and, optionally, Claude Code token counts;
 - syncs the daily rows to a Notion database;
-- posts to Slack when collection breaks.
+- serves a small dashboard on your tailnet: usage over time, how close you are to each limit, Claude Code tokens per day, an estimated weekly limit in tokens, and a log of detected limit changes;
+- posts to Slack when collection breaks or a plan limit changes.
 
 Polling is adaptive: every 30 s while usage is moving, backing off to every 5 min when idle.
 
@@ -25,11 +26,11 @@ See [DECISIONS.md](DECISIONS.md) for what was borrowed from prior art and why.
 > This project isn't affiliated with or endorsed by Anthropic. Use it with your own account, and keep the polling rate modest.
 
 ```
-claude.ai usage API ──► poller (systemd service) ──► usage.db (SQLite, WAL)
+claude.ai usage API ──► poller (systemd service) ──► usage.db (SQLite, WAL) ◄── dashboard (tailnet) ◄── browser
+                              │                          │        ▲
+              limit changes / failures ──► Slack         │        └── POST hourly token totals ◄── Mac: cc-push (launchd)
                                                          │
-                             nightly timers: cc-tokens ─►│◄─ rollup ──► daily ──► sync ──► Notion
-                                                         │
-                         failures / thresholds ──► Slack webhook
+                                       nightly timers: rollup ──► daily ──► sync ──► Notion
 ```
 
 ## Install
@@ -68,6 +69,47 @@ claude-usage status
 
 **Timer timezone:** the nightly timers run at 00:05 (cc-tokens), 00:15 (rollup) and 00:30 (sync), in `TZ_NAME`. `install.sh` reads `TZ_NAME` from `.env` when it writes the timers, so if you change `TZ_NAME`, re-run `install.sh`.
 
+## Dashboard
+
+`install.sh` runs it as `claude-usage-dashboard.service`, listening on `127.0.0.1:8787` on the Pi. To open it from your other devices, publish it on your tailnet:
+
+```sh
+sudo tailscale serve --bg 8787
+```
+
+Then open `https://<pi-name>.<your-tailnet>.ts.net/` from any device on your tailnet. `tailscale serve` adds HTTPS and keeps the dashboard off your home LAN. It needs MagicDNS and HTTPS certificates turned on in the Tailscale admin console under DNS. The read pages have no login, because tailnet membership is the access control.
+
+It shows:
+- **Weekly limit:** a big percentage with a meter, the reset time, and a pace projection ("about 79% by reset").
+- **Tiles:** the 5-hour session, each per-model weekly limit (Fable, and so on), this week's split by surface (Claude Code, Chats, Cowork), and usage credits.
+- **Weekly and session charts:** percentage over time, with markers where a limit change was detected. Range filter: 7, 30 or 90 days, or all.
+- **Claude Code tokens per day,** by model family. This needs the Mac push below.
+- **Implied weekly limit:** for each weekly window, the Claude Code tokens that would equal 100%, estimated as tokens ÷ (weekly % × Claude Code's share). A shift of more than about 33% against the previous weeks is flagged as a possible limit change. It's an estimate, because models count differently toward the limit.
+- **Limit changes:** a log of everything detected in the responses, such as limits added or removed, the weekly reset moving off schedule, per-model allowances changing, the extra-usage cap changing, and response fields added or removed. Limit-level changes also go to Slack. On the Pi, `claude-usage events` lists them.
+
+Every chart has a **Table** view, and the page follows your system's light or dark mode.
+
+### Claude Code tokens from your Mac
+
+Claude Code writes token usage to transcript files on the machine where it runs. Your Mac sends hourly totals per model to the Pi. **Only numbers leave the Mac, never prompts, code or responses.**
+
+1. On the Pi, generate a shared token and add it to `/opt/claude-usage/.env`:
+   ```sh
+   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+   sudo nano /opt/claude-usage/.env          # CC_INGEST_TOKEN=<that value>
+   sudo systemctl restart claude-usage-dashboard
+   ```
+2. On the Mac, from this repo:
+   ```sh
+   ./mac/install-mac.sh                       # creates ~/.claude-usage/.env
+   nano ~/.claude-usage/.env                  # CC_PUSH_URL=https://<pi-name>.<tailnet>.ts.net/api/cc-hourly
+                                              # CC_PUSH_TOKEN=<same token as on the Pi>
+   ./mac/install-mac.sh                       # sends full history once, then every 30 min via launchd
+   ```
+   The log is at `~/.claude-usage/push.log`. Each run resends the last 14 days, replacing those hours, so a Mac that was asleep or offline catches up on its next run. To remove the job: `launchctl bootout gui/$(id -u)/com.claude-usage.cc-push`.
+
+If you also run Claude Code on the Pi, set `CLAUDE_CODE_LOG_DIR` there too. Totals from every machine are added together.
+
 ## Configuration
 
 All settings live in `/opt/claude-usage/.env` (owner `claudeusage`, mode `600`). Keep this file out of any backup that leaves the Pi. In cookie mode the session key is a full-account credential.
@@ -84,6 +126,8 @@ All settings live in `/opt/claude-usage/.env` (owner `claudeusage`, mode `600`).
 | `TZ_NAME` | e.g. `America/New_York`; defines a "day" |
 | `CLAUDE_CODE_LOG_DIR` | Optional, e.g. `/home/pi/.claude/projects`; unset = token job skipped |
 | `ALERT_WEEKLY_PCT` | Optional, e.g. `80`; one alert per weekly window when crossed |
+| `CC_INGEST_TOKEN` | Shared secret for the Mac's token push (see Dashboard) |
+| `DASHBOARD_BIND` / `DASHBOARD_PORT` | Optional; default `127.0.0.1` / `8787` |
 
 Optional tuning variables (`POLL_*`, `CLAUDE_IMPERSONATE`, `CLAUDE_OAUTH_CREDENTIALS`) are documented in `.env.example`.
 
@@ -164,6 +208,9 @@ All of these run as `claude-usage <command>`, which is a wrapper for `/opt/claud
 | `cc-tokens` | Sums Claude Code tokens per day from `CLAUDE_CODE_LOG_DIR` (skipped if unset) |
 | `backfill-parse` | Re-parses `raw_json` of every poll after a parser fix |
 | `test-alert` | Sends a test Slack message |
+| `serve` | The dashboard web server (run by `claude-usage-dashboard.service`) |
+| `events` | Lists detected limit changes. `--rebuild` recomputes them from every stored response |
+| `cc-push` | **Mac only:** sends hourly Claude Code token totals to the Pi. `--all` sends full history |
 
 ### `status`
 
@@ -200,7 +247,7 @@ claude-usage rollup --all && claude-usage sync
 - **Session/weekly limit hit** means at least one poll that day read ≥ 100 %.
 - **Credits spent** is the day's increase in month-to-date usage-credit spend (`extra_usage.used_credits`). A drop is treated as the monthly reset. **Overage** means credits spent > 0.
 - **Polls** counts successful polls that day, including ones not written to `polls` because nothing changed.
-- These are percentages of plan limits. Anthropic doesn't publish a conversion to tokens, and this tool doesn't attempt one.
+- These are percentages of plan limits. Anthropic doesn't publish the limit in tokens. The dashboard's *implied weekly limit* is an inference from your Claude Code tokens, not a published number. Chat and Cowork usage counts toward the limit but has no token log anywhere.
 - Data starts at the first successful poll. There is no backfill of earlier history.
 
 ## OAuth mode (alternative to the cookie)
@@ -260,6 +307,9 @@ Layout:
   - `alerts.py`: Slack alerts.
   - `cctokens.py`: Claude Code token counts.
 - `systemd/`: the unit files.
+- `cusage/web/`: the dashboard page, styles and charts (plain JavaScript, no dependencies).
+- `cusage/events.py`, `cusage/estimate.py`: limit-change detection and the implied-limit estimate.
+- `mac/`: the Mac installer and launchd job for `cc-push`.
 - `assets/`: the quota mark (light and dark SVG, favicon), and `slack-app-icon.png`, a 1024 px render for the Slack app.
 - `install.sh`: the installer.
 

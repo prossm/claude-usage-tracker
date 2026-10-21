@@ -93,23 +93,27 @@ def _money(obj) -> float | None:
     return round(obj["amount_minor"] / (10 ** exp if isinstance(exp, int) else 100), 2)
 
 
+def scoped_limit_name(entry) -> str | None:
+    """Bucket name for a `limits` entry of kind weekly_scoped, e.g. seven_day_fable."""
+    if not isinstance(entry, dict) or entry.get("kind") != "weekly_scoped":
+        return None
+    scope = entry.get("scope") if isinstance(entry.get("scope"), dict) else {}
+    model = scope.get("model") if isinstance(scope.get("model"), dict) else {}
+    surface = scope.get("surface")
+    surface_name = (surface.get("display_name") or surface.get("id")) if isinstance(surface, dict) else surface
+    if model.get("display_name") or model.get("id"):
+        return f"seven_day_{_slug(str(model.get('display_name') or model.get('id')))}"
+    if surface_name:
+        return f"seven_day_surface_{_slug(str(surface_name))}"
+    return None
+
+
 def _scoped_limit_buckets(limits, existing: set[str]) -> list[Bucket]:
     out = []
     for entry in limits if isinstance(limits, list) else []:
-        if not isinstance(entry, dict) or entry.get("kind") != "weekly_scoped":
-            continue
-        scope = entry.get("scope") if isinstance(entry.get("scope"), dict) else {}
-        model = scope.get("model") if isinstance(scope.get("model"), dict) else {}
-        surface = scope.get("surface")
-        surface_name = (surface.get("display_name") or surface.get("id")) if isinstance(surface, dict) else surface
-        if model.get("display_name") or model.get("id"):
-            name = f"seven_day_{_slug(str(model.get('display_name') or model.get('id')))}"
-        elif surface_name:
-            name = f"seven_day_surface_{_slug(str(surface_name))}"
-        else:
-            continue
-        if name in existing:
-            continue  # already reported as a top-level seven_day_<model> object
+        name = scoped_limit_name(entry)
+        if name is None or name in existing:
+            continue  # unscoped, or already reported as a top-level seven_day_<model> object
         existing.add(name)
         out.append(Bucket(name, _num(entry.get("percent")), to_iso(parse_iso(entry.get("resets_at")))))
     return out

@@ -32,8 +32,10 @@ fi
 echo "==> directories"
 install -d -m 750 -o "$SVC_USER" -g "$SVC_USER" "$PREFIX"
 rm -rf "$PREFIX/app"
-install -d -m 755 -o root -g root "$PREFIX/app" "$PREFIX/app/cusage"
+install -d -m 755 -o root -g root "$PREFIX/app" "$PREFIX/app/cusage" "$PREFIX/app/cusage/web" "$PREFIX/app/assets"
 install -m 644 -o root -g root "$SRC"/cusage/*.py "$PREFIX/app/cusage/"
+install -m 644 -o root -g root "$SRC"/cusage/web/* "$PREFIX/app/cusage/web/"
+install -m 644 -o root -g root "$SRC"/assets/quota-mark.svg "$SRC"/assets/quota-mark-dark.svg "$SRC"/assets/favicon.ico "$PREFIX/app/assets/"
 install -m 755 -o root -g root "$SRC/claude_usage.py" "$PREFIX/app/"
 install -m 644 -o root -g root "$SRC/requirements.txt" "$SRC/.env.example" "$PREFIX/app/"
 
@@ -69,6 +71,8 @@ done
 install -m 755 -o root -g root "$SRC/claude-usage.sh" /usr/local/bin/claude-usage
 systemctl daemon-reload
 systemctl enable --quiet claude-usage-poller.service
+systemctl enable --quiet claude-usage-dashboard.service
+systemctl restart claude-usage-dashboard.service
 systemctl enable --quiet --now claude-usage-cc-tokens.timer claude-usage-rollup.timer claude-usage-sync.timer
 
 AUTH_MODE=$(env_value CLAUDE_AUTH_MODE)
@@ -84,4 +88,6 @@ else
     echo "  4. claude-usage sync --check                  # check the Notion database"
     echo "  5. sudo systemctl start claude-usage-poller"
 fi
+PORT=$(env_value DASHBOARD_PORT); PORT=${PORT:-8787}
+echo "Dashboard: http://127.0.0.1:$PORT on the Pi. To reach it from your tailnet: sudo tailscale serve --bg $PORT"
 echo "Done. Check with: claude-usage status"

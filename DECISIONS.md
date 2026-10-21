@@ -262,3 +262,72 @@ The spec asks for a single `claude_usage.py` CLI. That file exists as a
 10-line entry point over the `cusage/` package (named so it doesn't shadow
 `claude_usage.py`), so each component can be tested in isolation. Tests use
 stdlib `unittest` (no pytest dependency): `python3 -m unittest discover -s tests -t .`.
+
+## Dashboard (added after the original spec, at the owner's request)
+
+The spec listed "no web dashboard" and "no conversion of percentages into
+tokens" as non-goals. Both were revisited on 2026-10-21, after the tracker
+was running, because the goal became seeing usage over time and noticing
+when plan limits change. What was built, and why it's shaped this way:
+
+- **Served from the Pi, stdlib `http.server`, no new dependencies.**
+  It reads `usage.db` directly, so it gets the full change-point series
+  rather than daily rollups. It binds to `127.0.0.1` and is published with
+  `tailscale serve`, which adds HTTPS and keeps it off the LAN. That
+  satisfies "no inbound ports". Read endpoints have no auth, because tailnet
+  membership is the boundary. CSP is `'self'` only, there are no
+  third-party scripts, and all API text is inserted with `textContent`.
+  Grafana was the alternative and was rejected again, for the same reasons
+  as before.
+- **Charts are hand-built SVG.** A chart library from a CDN would have
+  meant loosening the CSP and adding an outside dependency for four charts.
+  The palette starts from the mark's orange (`#DA7757`) and was checked with
+  the dataviz palette validator in both modes:
+  - light on `#fcfcfb`: all checks pass, but aqua and magenta sit below 3:1
+    contrast, so every chart has a legend and a table view;
+  - dark on `#1e2024`: all checks pass.
+  Colors follow entities: Fable is aqua in both the per-model limit and the
+  token chart. Lines are drawn as steps, because `polls` stores change
+  points: a value holds until the next one. Gaps of more than 25 min (an
+  outage, since saved rows are at most 15 min apart) break the line rather
+  than drawing a false flat value.
+- **Limit-change detection (`events.py`)** replays `raw_json`, so it works
+  on history and after parser fixes. A disappearing limit has to stay gone
+  for 24 h before it's reported as removed, so a briefly `null` window
+  doesn't flap. A weekly reset that lands on its 7-day schedule is normal;
+  any other change to the reset time is reported. Only the poller writes
+  events, so they're recorded once. Slack alerts fire only for events under
+  2 h old, so replaying history doesn't send old alerts.
+- **The implied weekly limit (`estimate.py`) is labeled as an estimate
+  everywhere.** Formula: Claude Code tokens in the window ÷ (weekly % ×
+  Claude Code share from `seven_day_breakdown`). Known error sources:
+  - per-model weighting;
+  - the integer-rounded share;
+  - chat and Cowork tokens being invisible.
+
+  Windows with partial data are drawn faded and excluded from the
+  baseline. A shift of more than 33% against the median of the previous 3
+  clean windows is flagged. The default measure excludes cache reads, which
+  dominate raw counts and are likely discounted toward limits. That's an
+  assumption, so the dashboard can switch measures.
+
+## Claude Code tokens from other machines (`cc-push`)
+
+Claude Code runs on the Mac, not the Pi, and its transcripts contain code
+and prompts. The options were to copy the transcripts to the Pi, or to send
+only totals. **Only totals are sent:** per UTC hour and model, the four
+token counts plus a message count. A test asserts that no message content
+appears in the payload.
+
+- The Mac scans locally, with the same deduplication as before, into
+  `~/.claude-usage/cc.db`. A launchd job runs `cc-push` every 30 min and
+  resends the last 14 days. The Pi replaces totals per (source, hour), so
+  resends are idempotent and an offline Mac catches up on its next run.
+- `POST /api/cc-hourly` requires `CC_INGEST_TOKEN` (constant-time compare),
+  limits the body to 8 MB, and validates every field. `source = "local"` is
+  reserved for the Pi's own scan.
+- Hourly rather than daily granularity, because weekly windows reset
+  mid-day (e.g. 18:00 UTC) and the estimate needs window-accurate token sums.
+- Tested end to end on 2026-10-21 against real local transcripts: 65 files
+  became 132 hourly rows in about 1 s, and a resend replaced the rows
+  without double counting.

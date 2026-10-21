@@ -86,6 +86,36 @@ CREATE TABLE IF NOT EXISTS cc_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_cc_messages_day ON cc_messages(day);
 
+-- Claude Code token totals per UTC hour and model, per machine ("source").
+-- "local" is this machine's own scan; other sources arrive via POST /api/cc-hourly.
+CREATE TABLE IF NOT EXISTS cc_hourly (
+    source             TEXT NOT NULL,
+    hour               TEXT NOT NULL,   -- UTC, YYYY-MM-DDTHH:00:00Z
+    model              TEXT NOT NULL,
+    input_tokens       INTEGER NOT NULL DEFAULT 0,
+    output_tokens      INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+    messages           INTEGER NOT NULL DEFAULT 0,
+    received_at        TEXT,
+    PRIMARY KEY (source, hour, model)
+);
+CREATE INDEX IF NOT EXISTS idx_cc_hourly_hour ON cc_hourly(hour);
+
+-- Detected changes to plan limits, derived from polls.raw_json.
+CREATE TABLE IF NOT EXISTS limit_events (
+    id        INTEGER PRIMARY KEY,
+    poll_id   INTEGER,
+    at        TEXT NOT NULL,
+    kind      TEXT NOT NULL,
+    subject   TEXT,
+    old_value TEXT,
+    new_value TEXT,
+    severity  TEXT NOT NULL,       -- "limit" (worth an alert) or "info"
+    message   TEXT NOT NULL,
+    UNIQUE (poll_id, kind, subject)
+);
+
 CREATE TABLE IF NOT EXISTS cc_processed_files (
     path  TEXT PRIMARY KEY,
     mtime REAL NOT NULL,
@@ -94,15 +124,16 @@ CREATE TABLE IF NOT EXISTS cc_processed_files (
 """
 
 
-def connect(path: Path | str) -> sqlite3.Connection:
+def connect(path: Path | str, init: bool = True) -> sqlite3.Connection:
     if str(path) != ":memory:":
         Path(path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), timeout=30)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=30000")
-    conn.executescript(SCHEMA)
+    if init:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.executescript(SCHEMA)
     return conn
 
 

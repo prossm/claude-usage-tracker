@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claude Usage</title>
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32">
+  <link rel="icon" href="/assets/quota-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/dashboard.css">
+  <script src="/dashboard.js" defer></script>
+</head>
+<body>
+<main id="app">
+  <header class="top">
+    <img class="mark mark-light" src="/assets/quota-mark.svg" alt="">
+    <img class="mark mark-dark" src="/assets/quota-mark-dark.svg" alt="">
+    <h1>Claude usage</h1>
+    <span class="health" id="health"><span class="dot"></span><span>Loading…</span></span>
+  </header>
+
+  <div class="filters">
+    <label>Range
+      <span class="seg" id="range" role="group" aria-label="Time range">
+        <button type="button" data-v="7d">7 days</button>
+        <button type="button" data-v="30d">30 days</button>
+        <button type="button" data-v="90d">90 days</button>
+        <button type="button" data-v="all">All</button>
+      </span>
+    </label>
+    <label>Tokens
+      <select id="measure" aria-label="Token measure">
+        <option value="no_cache_read">Excluding cache reads</option>
+        <option value="all">All, including cache reads</option>
+        <option value="output">Output only</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="grid">
+    <section class="card span-6 hero" id="weekly-hero" aria-live="polite"></section>
+    <section class="card span-3 tile" id="session-tile"></section>
+    <section class="card span-3 tile" id="mix-tile"></section>
+    <div class="contents" id="bucket-tiles"></div>
+
+    <section class="card">
+      <h2>Weekly usage</h2>
+      <p class="sub">Percent of each weekly limit. Markers show detected limit changes.</p>
+      <div id="weekly-chart"></div>
+    </section>
+
+    <section class="card">
+      <h2>5-hour session usage</h2>
+      <p class="sub">Percent of the rolling 5-hour limit.</p>
+      <div id="session-chart"></div>
+    </section>
+
+    <section class="card">
+      <h2>Claude Code tokens per day</h2>
+      <p class="sub" id="tokens-sub">By model family.</p>
+      <div id="tokens-chart"></div>
+    </section>
+
+    <section class="card">
+      <h2>Implied weekly limit</h2>
+      <p class="sub">Estimated Claude Code tokens that would equal 100% of the weekly limit, per weekly window.</p>
+      <div id="implied-chart"></div>
+      <p class="note">An estimate, not a measurement. It divides Claude Code tokens by Claude Code's share of the weekly
+        percentage. Models count differently toward the limit, so a change in model mix moves it too. Faded bars are
+        incomplete (window in progress, or tracking started part-way through).</p>
+    </section>
+
+    <section class="card">
+      <h2>Limit changes</h2>
+      <p class="sub">Detected from the usage responses: limits added or removed, reset schedule, per-model allowances.</p>
+      <ul class="events" id="events"></ul>
+    </section>
+  </div>
+  <footer>Unofficial. Reads the same internal endpoint as claude.ai Settings &gt; Usage. Refreshes every minute.</footer>
+</main>
+</body>
+</html>

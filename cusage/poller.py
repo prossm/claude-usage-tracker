@@ -15,7 +15,7 @@ import sqlite3
 import threading
 from datetime import datetime
 
-from . import config as config_mod
+from . import config as config_mod, events
 from .alerts import Alerter
 from .client import Auth, FetchResult, make_auth
 from .config import Config
@@ -150,6 +150,7 @@ class Poller:
             if force_persist or should_persist(key, self.last_key, self.last_persisted_at, now, self.cfg.poll_heartbeat_s):
                 insert_poll(self.conn, now, result, usage, interval, self.auth.mode)
                 self.last_key, self.last_persisted_at = _norm(key), now
+                self._limit_events(now)
             self.last_usage = usage
             log.info("ok session=%s%% weekly=%s%% next=%ss", usage.session_pct, usage.weekly_pct, int(interval))
         else:
@@ -172,6 +173,18 @@ class Poller:
         self.alerter.on_poll(result, usage, self.consecutive_failures, now)
         self.conn.commit()
         return result, usage
+
+    def _limit_events(self, now: datetime) -> None:
+        try:
+            new = events.update(self.conn, self.cfg)
+        except Exception as exc:  # event detection must never break polling
+            log.exception("limit event detection failed: %s", scrub(exc))
+            return
+        for e in new:
+            log.info("limit event: %s", e["message"])
+            recent = (now - parse_iso(e["at"])).total_seconds() < 7200  # don't alert on history replays
+            if e["severity"] == events.LIMIT and recent:
+                self.alerter.send(f"Claude usage tracker: plan limit change. {e['message']}.")
 
     def _maybe_reload_config(self, env_path, mtime_seen):
         try:
