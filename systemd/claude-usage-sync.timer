@@ -1,0 +1,10 @@
+[Unit]
+Description=Claude usage tracker: Notion sync (nightly)
+
+[Timer]
+OnCalendar=*-*-* 00:30:00 @TZ@
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

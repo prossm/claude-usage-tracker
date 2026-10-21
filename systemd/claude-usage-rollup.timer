@@ -1,0 +1,10 @@
+[Unit]
+Description=Claude usage tracker: daily rollup (nightly)
+
+[Timer]
+OnCalendar=*-*-* 00:15:00 @TZ@
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

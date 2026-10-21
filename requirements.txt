@@ -1,0 +1,3 @@
+# Only third-party dependency. Used for claude.ai requests with browser TLS
+# impersonation (Cloudflare); Notion and Slack use the standard library.
+curl_cffi>=0.10,<1

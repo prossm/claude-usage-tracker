@@ -1,0 +1,32 @@
+[Unit]
+Description=Claude usage tracker: adaptive poller
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+OnFailure=claude-usage-failure@%n.service
+
+[Service]
+Type=simple
+ExecStart=/opt/claude-usage/venv/bin/python /opt/claude-usage/app/claude_usage.py poll --daemon
+Restart=always
+RestartSec=30
+User=claudeusage
+Group=claudeusage
+WorkingDirectory=/opt/claude-usage
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/claude-usage
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

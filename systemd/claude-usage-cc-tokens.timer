@@ -1,0 +1,10 @@
+[Unit]
+Description=Claude usage tracker: Claude Code token totals (nightly)
+
+[Timer]
+OnCalendar=*-*-* 00:05:00 @TZ@
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

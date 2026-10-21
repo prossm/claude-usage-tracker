@@ -1,0 +1,24 @@
+[Unit]
+Description=Claude usage tracker: Notion sync
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/claude-usage/venv/bin/python /opt/claude-usage/app/claude_usage.py sync
+User=claudeusage
+Group=claudeusage
+WorkingDirectory=/opt/claude-usage
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/claude-usage
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+UMask=0077
